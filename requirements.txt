@@ -1,0 +1,6 @@
+flask
+pandapower 
+numpy 
+pandas
+plotly
+numba
