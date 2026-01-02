@@ -287,7 +287,11 @@ def run_simulation(num_cars, solar_intensity, strategy):
             car['status'] = 'stopped'
             
     # Apply Loads to Net
-    net.load.drop(net.load.index, inplace=True) 
+    # net.load.drop(net.load.index, inplace=True) # FIXED: Do not drop base loads!
+    
+    # Capture base indices so we can reset to them later if needed
+    base_load_indices = net.load.index.tolist()
+    
     for car in car_data:
         if car['rate'] > 0:
             pp.create_load(net, bus=car['bus_loc'], p_mw=car['rate']/1000.0, q_mvar=0)
@@ -341,7 +345,11 @@ def run_simulation(num_cars, solar_intensity, strategy):
             # Re-run Power Flow with new rates?
             # Strictly speaking we should, to get final metrics.
             # Reset loads
-            net.load.drop(net.load.index, inplace=True) 
+        if intervention_needed:
+            new_status = "Smart Voltage Optimization"
+            # Reset loads: Keep only base loads, remove the EV loads we added previously
+            net.load = net.load.loc[base_load_indices]
+            
             for car in car_data:
                 if car['rate'] > 0.001:
                     pp.create_load(net, bus=car['bus_loc'], p_mw=car['rate']/1000.0, q_mvar=0)
