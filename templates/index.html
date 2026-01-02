@@ -145,7 +145,7 @@
             font-size: 12px;
             width: 240px;
             line-height: 1.5;
-            z-index: 100;
+            z-index: 2000;
             pointer-events: none;
             white-space: normal;
             text-align: left;
@@ -205,6 +205,17 @@
 
         input[type="range"]::-webkit-slider-thumb:active {
             transform: scale(1.1);
+        }
+
+        input[type="number"] {
+            width: 60px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid #d1d1d6;
+            font-size: 13px;
+            font-weight: 600;
+            text-align: right;
+            margin-left: auto;
         }
 
         select {
@@ -393,10 +404,14 @@
                         <span class="info-icon">i</span>
                     </span>
                 </label>
-                <input type="range" id="numCars" min="1" max="150" value="10" oninput="uiUpdate()">
-                <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600;">
+                <input type="range" id="numCarsRange" min="1" max="150" value="10" oninput="uiUpdate('range')">
+                <div
+                    style="display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:600;">
                     <span style="color:#aaa;">Simulated Fleet</span>
-                    <span><span id="carsVal">10</span> EVs</span>
+                    <div style="display:flex; align-items:center;">
+                        <input type="number" id="numCarsInput" min="1" max="150" value="10" oninput="uiUpdate('input')">
+                        <span style="margin-left:5px;">EVs</span>
+                    </div>
                 </div>
             </div>
 
@@ -408,7 +423,7 @@
                         <span class="info-icon">i</span>
                     </span>
                 </label>
-                <input type="range" id="solar" min="0" max="100" value="50" oninput="uiUpdate()">
+                <input type="range" id="solar" min="0" max="100" value="50" oninput="uiUpdate('solar')">
                 <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600;">
                     <span style="color:#aaa;">Renewable Output</span>
                     <span><span id="solarVal">50</span>%</span>
@@ -503,7 +518,7 @@
                 <div class="map-wrapper" id="gridMap">
                     <div
                         style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:#aaa; font-weight:500;">
-                        Press Start to Visualise Topology
+                        Map Waiting for Data... (Press Start)
                     </div>
                 </div>
             </div>
@@ -521,8 +536,14 @@
         let currentTemp = 45;
         let isBlackout = false;
 
-        function uiUpdate() {
-            document.getElementById('carsVal').innerText = document.getElementById('numCars').value;
+        function uiUpdate(source) {
+            // Sync Input and Range
+            if (source === 'range') {
+                document.getElementById('numCarsInput').value = document.getElementById('numCarsRange').value;
+            } else if (source === 'input') {
+                document.getElementById('numCarsRange').value = document.getElementById('numCarsInput').value;
+            }
+            // Solar update
             document.getElementById('solarVal').innerText = document.getElementById('solar').value;
         }
 
@@ -581,7 +602,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        num_cars: document.getElementById('numCars').value,
+                        num_cars: document.getElementById('numCarsRange').value,
                         solar: document.getElementById('solar').value,
                         strategy: document.getElementById('strategy').value
                     })
