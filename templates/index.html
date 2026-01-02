@@ -19,7 +19,7 @@
         .dashboard { display: grid; grid-template-columns: 320px 1fr; gap: 40px; width: 90%; max-width: 1400px; margin-bottom: 80px; }
         .panel { background: var(--gray); padding: 30px; border-radius: 24px; height: fit-content; }
         
-        /* TOOLTIPS */
+        /* Tooltips */
         .info-icon { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; border: 1px solid #ccc; font-size: 10px; color: #888; margin-left: 6px; cursor: help; font-style: normal; }
         .info-icon:hover::after { content: attr(data-tooltip); position: absolute; background: #111; color: white; padding: 8px 12px; border-radius: 6px; font-size: 11px; width: 220px; line-height: 1.4; z-index: 100; transform: translateY(-30px); pointer-events: none; white-space: normal; text-align: left; }
 
@@ -84,17 +84,12 @@
             </select>
             <button class="run-btn" onclick="runSim()">SYNC NETWORK</button>
             <div style="margin-top:30px; font-size:11px; color:#888;" id="log">System Ready.</div>
-            
-            <div style="margin-top:20px; padding:15px; background:#f0f0f0; border-radius:12px; text-align:center;">
-                <div style="font-size:10px; font-weight:700; color:#888; text-transform:uppercase;">Simulation Uptime</div>
-                <div id="uptimeClock" style="font-size:24px; font-weight:700; color:#333; font-family:monospace;">00:00:00</div>
-            </div>
         </div>
 
         <div>
             <div class="metrics-grid">
                 <div class="metric-card">
-                    <div class="metric-label">Grid Battery <span class="info-icon" data-tooltip="Real-time stored energy level. Drains if Load > Solar.">i</span></div>
+                    <div class="metric-label">Grid Battery <span class="info-icon" data-tooltip="Current charge level of grid storage.">i</span></div>
                     <div class="metric-value"><span id="battLevel">80</span>%</div>
                 </div>
                 <div class="metric-card">
@@ -109,11 +104,11 @@
                 </div>
 
                 <div class="metric-card">
-                    <div class="metric-label">Transf. Temp <span class="info-icon" data-tooltip=">100°C: Overheating Warning. >150°C: EXPLOSION.">i</span></div>
+                    <div class="metric-label">Transf. Temp <span class="info-icon" data-tooltip=">100°C: Overheating Warning. >200°C: CATASTROPHIC FAILURE.">i</span></div>
                     <div class="metric-value" id="tempDisplay" style="color:var(--green)">45°C</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">Grid Life <span class="info-icon" data-tooltip="Time remaining until battery empty or full.">i</span></div>
+                    <div class="metric-label">Grid Life <span class="info-icon" data-tooltip="Time until battery empty or full.">i</span></div>
                     <div class="metric-value" id="timeEst" style="font-size:18px;">-</div>
                 </div>
                 <div class="metric-card">
@@ -125,10 +120,10 @@
             <div class="map-section">
                 <div class="map-title">LIVE FEEDER TOPOLOGY</div>
                 <details>
-                    <summary>Field Manual: Zone Definitions</summary>
+                    <summary>Field Manual: Physics & Constraints</summary>
                     <div class="explainer-text">
-                        <strong>Live Physics:</strong> Watch the Battery % drop in real-time when Net Flow is negative.
-                        <br><strong>Thermal Physics:</strong> If Temp > 150°C, the transformer explodes.
+                        <strong>Brownout:</strong> If Demand > (Solar + Battery), the grid forces a voltage drop. Cars stop charging to prevent total collapse.
+                        <br><strong>Thermodynamics:</strong> Transformers heat up due to load ($I^2R$). Limit: 200°C (Mineral Oil flash point).
                     </div>
                 </details>
                 <div class="map-wrapper" id="gridMap">
@@ -154,7 +149,7 @@
         let currentBatteryPct = 80;
         let currentNetFlow = 0;
         let currentTemp = 45;
-        let currentSolar = 0;
+        let isBlackout = false;
 
         function uiUpdate() {
             document.getElementById('carsVal').innerText = document.getElementById('numCars').value;
@@ -162,44 +157,45 @@
         }
 
         // --- CLIENT SIDE PHYSICS ENGINE ---
-        function startLiveTicker(startTimestamp) {
+        function startLiveTicker() {
             if(physicsInterval) clearInterval(physicsInterval);
-            const startDate = new Date(startTimestamp * 1000);
 
             physicsInterval = setInterval(() => {
-                // 1. Clock
-                const now = new Date();
-                const diff = now - startDate;
-                const hours = Math.floor(diff / 3600000);
-                const minutes = Math.floor((diff % 3600000) / 60000);
-                const seconds = Math.floor((diff % 60000) / 1000);
-                document.getElementById('uptimeClock').innerText = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                if(isBlackout) return;
 
-                // 2. Battery Physics (Drain based on Net Flow)
-                // If flow is -2.5 MW, drain 0.1% per tick
+                // 1. Battery Physics (Visual Interpolation)
+                // Drain proportional to flow. 1MW = fast drain.
                 let drainSpeed = currentNetFlow * 0.05; 
                 currentBatteryPct += drainSpeed;
                 if(currentBatteryPct < 0) currentBatteryPct = 0;
                 if(currentBatteryPct > 100) currentBatteryPct = 100;
                 document.getElementById('battLevel').innerText = currentBatteryPct.toFixed(1);
 
-                // 3. Thermal Physics (Heat up if overloaded)
-                if (currentNetFlow < -2) {
-                    currentTemp += 0.2; // Slowly heat up
+                // 2. Thermal Physics
+                // Heat rises if net flow is heavily negative (Load >> Solar)
+                if (currentNetFlow < -1) {
+                    currentTemp += 0.5; // Rise!
                 } else if (currentTemp > 45) {
-                    currentTemp -= 0.1; // Cool down naturally
+                    currentTemp -= 0.2; // Cool
                 }
                 const tempEl = document.getElementById('tempDisplay');
                 tempEl.innerText = currentTemp.toFixed(1) + "°C";
-                if(currentTemp > 100) tempEl.style.color = "var(--orange)";
-                else tempEl.style.color = "var(--green)";
+                if(currentTemp > 180) { tempEl.style.color = "var(--red)"; }
+                else if(currentTemp > 100) { tempEl.style.color = "var(--orange)"; }
+                else { tempEl.style.color = "var(--green)"; }
 
-                // 4. Solar Fluctuation (Organic)
-                let noise = (Math.random() - 0.5) * 0.05;
-                let organicSolar = Math.max(0, currentSolar + noise);
-                document.getElementById('solarMW').innerText = organicSolar.toFixed(2);
+                // 3. CAR CHARGING ANIMATION
+                // Animate bars filling up
+                const bars = document.querySelectorAll('.car-bar-fill');
+                bars.forEach(bar => {
+                    // Only fill if not red (stopped)
+                    if (bar.style.backgroundColor !== 'var(--red)') {
+                        let w = parseFloat(bar.style.width);
+                        if(w < 100) bar.style.width = (w + 0.1) + "%";
+                    }
+                });
 
-            }, 1000);
+            }, 500); // 2Hz Update Rate
         }
 
         async function runSim() {
@@ -212,22 +208,31 @@
                 });
                 const data = await res.json();
                 
-                // Initialize Client Physics
+                // State Update
                 currentBatteryPct = data.grid_battery_percent;
                 currentNetFlow = data.net_flow_mw;
                 currentTemp = data.transformer_temp;
-                currentSolar = data.total_solar_mw;
-                startLiveTicker(data.start_ts);
+                isBlackout = data.grid_status_text.includes("EXPLODED") || data.grid_status_text.includes("FAILURE");
+                
+                startLiveTicker();
 
-                // UI SNAPSHOT
+                // UI
+                document.getElementById('solarMW').innerText = data.total_solar_mw.toFixed(2);
                 document.getElementById('netFlow').innerText = data.net_flow_mw.toFixed(2);
-                if(data.net_flow_mw < 0) document.getElementById('netFlow').style.color = "var(--red)";
-                else document.getElementById('netFlow').style.color = "var(--green)";
+                const flowEl = document.getElementById('netFlow');
+                if(data.net_flow_mw < 0) flowEl.style.color = "var(--red)";
+                else flowEl.style.color = "var(--green)";
 
                 document.getElementById('sysStatus').innerText = data.grid_status_text;
                 document.getElementById('timeEst').innerText = data.time_estimate;
                 document.getElementById('log').innerText = `Last Update: ${data.history[0].time} | Status: ${data.history[0].status}`;
                 
+                document.body.className = ""; 
+                if (isBlackout) {
+                    document.body.className = "blackout";
+                    document.getElementById('tempDisplay').style.color = "var(--red)";
+                }
+
                 const mapData = JSON.parse(data.map);
                 if(mapData.data) {
                     document.getElementById('gridMap').innerHTML = ""; 
@@ -246,11 +251,17 @@
             if(cars.length === 0) { grid.innerHTML = "<div style='color:#999; padding:20px; font-size:13px;'>No vehicles found.</div>"; return; }
             
             cars.forEach(c => {
-                let badgeHTML = (c.status === 'stopped' || c.penalty > 0) ? 
-                    `<div class="cong-badge" style="display:block; background:var(--brown);">Full in ${c.time_to_full}</div>` : 
-                    `<div class="time-badge">Full in ${c.time_to_full}</div>`;
-                
-                if (c.status === 'stopped') badgeHTML = `<div class="cong-badge" style="background:var(--red);">GRID FAILURE</div>`;
+                let badgeHTML = "";
+                let colorClass = "var(--green)";
+                if (c.status === 'stopped') {
+                    badgeHTML = `<div class="cong-badge" style="background:var(--red); display:block;">GRID FAILURE</div>`;
+                    colorClass = "var(--red)";
+                } else if (c.status === 'slow') {
+                    badgeHTML = `<div class="cong-badge" style="display:block; background:var(--brown);">Full in ${c.time_to_full}</div>`;
+                    colorClass = "var(--brown)";
+                } else {
+                    badgeHTML = `<div class="time-badge">Full in ${c.time_to_full}</div>`;
+                }
 
                 grid.innerHTML += `
                     <div class="car-card ${c.status}">
@@ -258,10 +269,11 @@
                         <div style="font-weight:700; font-size:14px; margin-bottom:5px;">${c.model}</div>
                         <div style="font-size:12px; color:#666;">Connected to Bus ${c.bus_loc}</div>
                         <div style="width:100%; height:4px; background:#eee; margin-top:10px; border-radius:2px;">
-                            <div style="height:100%; width:${c.soc}%; background:${c.status === 'stopped' ? 'var(--red)' : 'var(--green)'}"></div>
+                            <div class="car-bar-fill" style="height:100%; width:${c.soc}%; background:${colorClass}; transition: width 0.5s;"></div>
                         </div>
                         <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:10px; color:#888;">
                             <span>${c.soc}% Battery</span>
+                            <span>${c.rate.toFixed(1)} kW</span>
                         </div>
                     </div>`;
             });
