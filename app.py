@@ -27,9 +27,10 @@ grid_state = {
     "ambient_temp": 30.0,
     "is_blackout": False, 
     "last_update": None,        # For dT calculations
-    "history": []
+    "last_update": None,        # For dT calculations
+    "history": [],
+    "fleet": []                 # Persistent Fleet State
 }
-
 # Standard IEEE 33-Bus Radial Topology for Visualization
 # Main Feeder: 0 -> 1 -> ... -> 17
 # Lateral 1 (at Bus 1): 1 -> 18 -> 19 -> 20 -> 21
@@ -195,21 +196,56 @@ def run_simulation(num_cars, solar_intensity, strategy):
                 "losses_mw": 0, "line_loading_percent": 0
             }
 
-    # 2. GENERATE DEMAND (EVs)
-    load_buses = net.load.bus.values
-    if len(load_buses) == 0:
-        load_buses = net.bus.index.values
-        
-    active_buses = np.random.choice(load_buses, max(1, int(num_cars)), replace=True)
-    car_data = []
+    # 2. MANAGE FLEET (Persistent State)
+    # If number of cars changed significantly, regenerate. Otherwise, update physics.
+    # Note: For simple UI slider adjustments, we'll authoritative reset if count mismatches.
     
-    for bus in active_buses:
-        model = np.random.choice(EV_MODELS)
-        car_data.append({
-            "model": model['name'], "capacity": model['capacity'], "soc": np.random.randint(10, 80),
-            "rate": model['max_rate'], "requested_rate": model['max_rate'], 
-            "status": "charging", "time_to_full": "...", "penalty": 0, "bus_loc": int(bus)
-        })
+    target_num_cars = max(1, int(num_cars))
+    current_fleet = grid_state["fleet"]
+    
+    if len(current_fleet) != target_num_cars:
+        # REGENERATE FLEET
+        load_buses = net.load.bus.values
+        if len(load_buses) == 0:
+            load_buses = net.bus.index.values
+            
+        active_buses = np.random.choice(load_buses, target_num_cars, replace=True)
+        new_fleet = []
+        
+        for bus in active_buses:
+            model = np.random.choice(EV_MODELS)
+            new_fleet.append({
+                "model": model['name'], 
+                "capacity": model['capacity'], 
+                "soc": float(np.random.randint(20, 80)), # Float for smooth updates
+                "max_rate": model['max_rate'],
+                "rate": 0.0,
+                "requested_rate": model['max_rate'], 
+                "status": "charging", 
+                "time_to_full": "...", 
+                "bus_loc": int(bus)
+            })
+        grid_state["fleet"] = new_fleet
+    else:
+        # UPDATE PHYSICS (Charge Cars)
+        # TIME ACCELERATION: 300x Real-time (1 sec real = 5 min sim)
+        # This allows users to actually see charging happen in a reasonable demo time.
+        TIME_ACCELERATION = 300.0 
+        hours_step = (dt * TIME_ACCELERATION) / 3600.0
+        
+        for car in current_fleet:
+            if car['soc'] < 100 and car['status'] != 'stopped':
+                energy_added_kwh = car['rate'] * hours_step
+                percent_added = (energy_added_kwh / car['capacity']) * 100.0
+                car['soc'] += percent_added
+                
+                if car['soc'] >= 100:
+                    car['soc'] = 100.0
+                    car['status'] = "done"
+                    car['rate'] = 0.0
+
+    # Local reference for logic
+    car_data = grid_state["fleet"]
 
     # 3. GENERATE SUPPLY (Solar)
     total_solar_mw = 3.0 * (solar_intensity / 100.0)
@@ -241,10 +277,15 @@ def run_simulation(num_cars, solar_intensity, strategy):
                  status_msg = "BROWNOUT (Power Limited)"
     
     for car in car_data:
+        # Reset requested rate if not fully charged
+        if car['soc'] < 100:
+            car['requested_rate'] = car['max_rate']
+            car['status'] = 'charging'
+            
         car['rate'] = car['requested_rate'] * global_ratio
-        if global_ratio < 0.05:
+        if global_ratio < 0.05 and car['soc'] < 100:
             car['status'] = 'stopped'
-
+            
     # Apply Loads to Net
     net.load.drop(net.load.index, inplace=True) 
     for car in car_data:
@@ -287,7 +328,7 @@ def run_simulation(num_cars, solar_intensity, strategy):
                     # Linear interpolation: at 0.95 -> 1.0, at 0.90 -> 0.0
                     throttle_factor = (vm_pu - 0.90) / 0.05
                     
-                if throttle_factor < 1.0:
+                if throttle_factor < 1.0 and car['soc'] < 100:
                     intervention_needed = True
                     car['rate'] *= throttle_factor
                     car['status'] = f"smart-curtailed {int(throttle_factor*100)}%"
@@ -384,12 +425,24 @@ def run_simulation(num_cars, solar_intensity, strategy):
         time_est = f"Full in {int((grid_state['max_kwh']-grid_state['battery_kwh'])/charge_rate)}h"
 
     # 10. CAR ETA
+    # 10. CAR ETA & ENERGY DETAILS
     for car in car_data:
-        if car['rate'] > 0.1:
-            h = int((car['capacity']*(100-car['soc'])/100)/car['rate'])
-            car['time_to_full'] = f"{h}h"
+        kwh_needed = (100.0 - car['soc']) / 100.0 * car['capacity']
+        car['kwh_needed'] = round(kwh_needed, 1) # Send to UI
+        
+        if car['rate'] > 0.1 and car['soc'] < 100:
+            hours_left = kwh_needed / car['rate']
+            if hours_left < 1.0:
+                 car['time_to_full'] = f"{int(hours_left * 60)} min"
+            else:
+                 car['time_to_full'] = f"{hours_left:.1f} hrs"
+        elif car['soc'] >= 100:
+            car['time_to_full'] = "Full"
         else:
             car['time_to_full'] = "Paused"
+
+    # Sort fleets by Bus Location for stable UI
+    car_data.sort(key=lambda x: x['bus_loc'])
 
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     grid_state["history"].insert(0, {"time": timestamp, "status": status_msg, "volts": round(min_voltage,3), "losses": round(losses_mw, 3)})
