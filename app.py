@@ -30,15 +30,34 @@ grid_state = {
     "history": []
 }
 
+# Standard IEEE 33-Bus Radial Topology for Visualization
+# Main Feeder: 0 -> 1 -> ... -> 17
+# Lateral 1 (at Bus 1): 1 -> 18 -> 19 -> 20 -> 21
+# Lateral 2 (at Bus 2): 2 -> 22 -> 23 -> 24
+# Lateral 3 (at Bus 5): 5 -> 25 -> ... -> 32
 IEEE_33_COORDS = {
-    0: (0, 0),    1: (1, 0),    2: (2, 0),    3: (3, 0),    4: (4, 0),
-    5: (5, 0),    6: (6, 0),    7: (7, 0),    8: (8, 0),    9: (9, 0),
-    10: (10, 0),  11: (11, 0),  12: (12, 0),  13: (13, 0),  14: (14, 0),
-    15: (15, 0),  16: (16, 0),  17: (17, 0),  
-    18: (1, 1),   19: (2, 1),   20: (3, 1),   21: (4, 1),   
-    22: (2, -1),  23: (3, -1),  24: (4, -1),                
-    25: (5, 1),   26: (6, 1),   27: (7, 1),   28: (8, 1),   29: (9, 1), 
-    30: (10, -1), 31: (11, -1), 32: (12, -1)                
+    0: (0, 0),     # Source
+    1: (1, 0),     2: (2, 0),     3: (3, 0),     4: (4, 0),
+    5: (5, 0),     6: (6, 0),     7: (7, 0),     8: (8, 0),     9: (9, 0),
+    10: (10, 0),   11: (11, 0),   12: (12, 0),   13: (13, 0),   14: (14, 0),
+    15: (15, 0),   16: (16, 0),   17: (17, 0),  
+    
+    # Lateral at Bus 1 (Nodes 19-22 locally named as 18-21 in 0-index often, check pandapower)
+    # Pandapower case33bw indices are 0-32.
+    # Connections (from standard diagram):
+    # 1-18, 18-19, 19-20, 20-21
+    18: (1, 1),    19: (1, 2),    20: (1, 3),    21: (1, 4),
+    
+    # Lateral at Bus 2 (Nodes 23-25) -> 22-24
+    # 2-22, 22-23, 23-24
+    22: (2, -1),   23: (2, -2),   24: (2, -3),
+    
+    # Lateral at Bus 5 (Nodes 26-33) -> 25-32
+    # 5-25, 25-26, 26-27...
+    # Also sub-lateral at 25? Standard IEEE 33 is complex.
+    # Simplified visual layout for "Lateral 3"
+    25: (5, 1),    26: (5, 2),    27: (5, 3),    28: (5, 4),    29: (5, 5),
+    30: (6, 5),    31: (7, 5),    32: (8, 5)     # Wrapping around
 }
 
 def get_live_map(net, car_data, is_blackout):
@@ -53,9 +72,9 @@ def get_live_map(net, car_data, is_blackout):
     edge_x = []
     edge_y = []
     line_color = '#bbb'
-    if grid_state["transformer_temp"] > 100:
+    if grid_state["transformer_temp"] > 90:
         line_color = '#FF9500' # Orange Hot
-    if grid_state["transformer_temp"] > 180:
+    if grid_state["transformer_temp"] > 150:
         line_color = '#FF3B30' # Red Hot
     if is_blackout:
         line_color = '#333' # Dark Grey (Dead)
@@ -102,16 +121,18 @@ def get_live_map(net, car_data, is_blackout):
             
             count = bus_counts.get(i, 0)
             node_size.append(15 + (count * 4))
-            node_text.append(f"<b>Bus {i}</b><br>Voltage: {v_pu:.2f}<br>EVs: {count}")
+            node_text.append(f"<b>Bus {i}</b><br>Voltage: {v_pu:.4f} p.u.<br>EVs: {count}")
             
             if is_blackout:
                 node_color.append('#000')
+            elif v_pu < 0.90:
+                node_color.append('#FF0000') # Critical Low
             elif v_pu < 0.95:
-                node_color.append('#FF3B30')
-            elif v_pu < 0.97:
-                node_color.append('#FF9500')
+                node_color.append('#FF9500') # Low
+            elif v_pu > 1.05:
+                node_color.append('#0000FF') # High
             else:
-                node_color.append('#34C759')
+                node_color.append('#34C759') # Good
 
     node_trace = go.Scatter(
         x=node_x, y=node_y, mode='markers', hoverinfo='text', text=node_text,
@@ -123,7 +144,7 @@ def get_live_map(net, car_data, is_blackout):
             size=node_size,
             colorbar=dict(
                 thickness=15,
-                title=dict(text='Voltage', side='right'),
+                title=dict(text='Voltage (p.u.)', side='right'),
                 xanchor='left'
             ),
             line=dict(width=2, color='#fff')
@@ -149,18 +170,17 @@ def run_simulation(num_cars, solar_intensity, strategy):
     net = pn.case33bw()
     current_time = time.time()
     
-    # Calculate Delta Time (dt) since last simulation step for physics integration
+    # Calculate Delta Time (dt) since last simulation step
     if grid_state["last_update"] is None:
-        dt = 1.0 # First run default
+        dt = 1.0 
     else:
         dt = current_time - grid_state["last_update"]
-        # Cap dt to avoid massive jumps if server slept
         if dt > 10:
             dt = 1.0 
     
     grid_state["last_update"] = current_time
 
-    # 1. RESET Logic
+    # 1. RESET Logic / Cooling
     if grid_state["is_blackout"]:
         # Natural Cooling
         grid_state["transformer_temp"] += (grid_state["ambient_temp"] - grid_state["transformer_temp"]) * 0.1
@@ -171,12 +191,12 @@ def run_simulation(num_cars, solar_intensity, strategy):
                 "min_voltage": 0.0, "total_solar_mw": 0, "grid_battery_percent": 0, 
                 "grid_status_text": "SYSTEM FAILURE", "time_estimate": "Offline", "net_flow_mw": 0, 
                 "transformer_temp": int(grid_state["transformer_temp"]), "cars": [], 
-                "history": grid_state["history"], "map": get_live_map(net, [], True)
+                "history": grid_state["history"], "map": get_live_map(net, [], True),
+                "losses_mw": 0, "line_loading_percent": 0
             }
 
-    # 2. GENERATE DEMAND (Initial Request)
+    # 2. GENERATE DEMAND (EVs)
     load_buses = net.load.bus.values
-    # If network has no loads by default, pick from all buses
     if len(load_buses) == 0:
         load_buses = net.bus.index.values
         
@@ -185,57 +205,53 @@ def run_simulation(num_cars, solar_intensity, strategy):
     
     for bus in active_buses:
         model = np.random.choice(EV_MODELS)
-        # We start with requested rate, but physics might crush it
         car_data.append({
             "model": model['name'], "capacity": model['capacity'], "soc": np.random.randint(10, 80),
             "rate": model['max_rate'], "requested_rate": model['max_rate'], 
             "status": "charging", "time_to_full": "...", "penalty": 0, "bus_loc": int(bus)
         })
 
-    # 3. GENERATE SUPPLY
-    # 100% solar = 3.0 MW (Realistic for this feeder size)
+    # 3. GENERATE SUPPLY (Solar)
     total_solar_mw = 3.0 * (solar_intensity / 100.0)
     for bus in [18, 22, 25, 32]:
         pp.create_sgen(net, bus, p_mw=total_solar_mw/4, q_mvar=0)
 
-    # 4. ENERGY BALANCE (The Constraints)
+    # 4. INITIAL ENERGY BALANCE 
     total_requested_mw = sum([c['requested_rate'] for c in car_data]) / 1000.0
-    
-    # Battery Output Cap (Assume grid inverter can do 10MW max)
     battery_discharge_cap_mw = 10.0 if grid_state["battery_kwh"] > 10 else 0.0
-    
-    # Total available power
     available_mw = total_solar_mw + battery_discharge_cap_mw
     
-    # Constraint Check
-    actual_delivered_mw = total_requested_mw
+    # 5. SMART STRATEGY (Optimization / Droop Control)
+    # Applied BEFORE Power Flow (Logic Simulation) or iteratively.
+    # Here we simulate an iterative approach by applying limits based on 'Grid Stress' assumptions
+    # or by running a baseline PF and then correcting.
+    # For efficiency, we will run logic based on available capacity first (Brownout prevention)
+    
     status_msg = "Stable"
-    
-    # If we want more than we have, we CRASH or BROWN OUT
+    # Global Capacity Check (Brownout)
+    global_ratio = 1.0
     if total_requested_mw > available_mw:
-        if grid_state["battery_kwh"] <= 10: # Battery dead
-            # BROWNOUT: Instant collapse to match Solar only
-            status_msg = "BROWNOUT (Power Limited)"
-            actual_delivered_mw = total_solar_mw # Cap at solar
-            # Scale down all cars
-            if total_solar_mw <= 0.1: # Practically zero
-                ratio = 0
-                status_msg = "GRID COLLAPSE (No Power)"
-            else:
-                ratio = total_solar_mw / total_requested_mw
-            
-            for car in car_data:
-                car['rate'] = car['requested_rate'] * ratio
-                car['status'] = 'stopped' if ratio < 0.05 else 'slow'
+        if grid_state["battery_kwh"] <= 10:
+             # Solar Only Limit
+             if total_solar_mw <= 0.1:
+                 global_ratio = 0
+                 status_msg = "GRID COLLAPSE (No Power)"
+             else:
+                 global_ratio = total_solar_mw / total_requested_mw
+                 status_msg = "BROWNOUT (Power Limited)"
     
-    # 5. PHYSICS (Update Loads)
+    for car in car_data:
+        car['rate'] = car['requested_rate'] * global_ratio
+        if global_ratio < 0.05:
+            car['status'] = 'stopped'
+
+    # Apply Loads to Net
     net.load.drop(net.load.index, inplace=True) 
     for car in car_data:
-        # Apply actual delivered power, not requested
         if car['rate'] > 0:
             pp.create_load(net, bus=car['bus_loc'], p_mw=car['rate']/1000.0, q_mvar=0)
-        
-    # --- POWER FLOW EXECUTION ---
+
+    # 6. RUN POWER FLOW (Physics)
     try:
         pp.runpp(net, numba=False)
         converged = True
@@ -247,34 +263,90 @@ def run_simulation(num_cars, solar_intensity, strategy):
         converged = False
         status_msg = "ERROR (Solver)"
 
-    # 6. THERMODYNAMICS (Real Inertia)
-    # Heat generation proportional to Current^2 (Power^2 roughly)
-    # Cooling proportional to (Temp - Ambient)
-    # Constant 0.5 represents thermal mass
-    if converged:
-        power_factor = (actual_delivered_mw / 2.5) ** 2  # Square law heating
-    else:
-        power_factor = 20.0 # High heat if undefined/diverged logic? Or 0? Let's say strain heat.
+    # 7. POST-FLOW SMART CORRECTION (Droop Control)
+    # If strategy is smart, we check voltages and throttle SPECIFIC cars to fix local issues
+    # This simulates a local smart inverter controller (Volt-Watt)
+    if strategy == "smart" and converged:
+        intervention_needed = False
+        new_status = status_msg
         
-    cooling_factor = (grid_state["transformer_temp"] - grid_state["ambient_temp"]) * 0.05
+        # Check every car's bus voltage
+        for car in car_data:
+            bus_idx = car['bus_loc']
+            try:
+                vm_pu = net.res_bus.at[bus_idx, 'vm_pu']
+                # DROOP CURVE:
+                # V > 0.95: 100% Rate
+                # 0.90 < V < 0.95: Linear reduction
+                # V < 0.90: 0% Rate (Cutoff)
+                
+                throttle_factor = 1.0
+                if vm_pu < 0.90:
+                    throttle_factor = 0.0
+                elif vm_pu < 0.95:
+                    # Linear interpolation: at 0.95 -> 1.0, at 0.90 -> 0.0
+                    throttle_factor = (vm_pu - 0.90) / 0.05
+                    
+                if throttle_factor < 1.0:
+                    intervention_needed = True
+                    car['rate'] *= throttle_factor
+                    car['status'] = f"smart-curtailed {int(throttle_factor*100)}%"
+                    
+            except:
+                pass
+        
+        if intervention_needed:
+            new_status = "Smart Voltage Optimization"
+            # Re-run Power Flow with new rates?
+            # Strictly speaking we should, to get final metrics.
+            # Reset loads
+            net.load.drop(net.load.index, inplace=True) 
+            for car in car_data:
+                if car['rate'] > 0.001:
+                    pp.create_load(net, bus=car['bus_loc'], p_mw=car['rate']/1000.0, q_mvar=0)
+            try:
+                pp.runpp(net, numba=False)
+                status_msg = new_status
+            except:
+                converged = False # Optimization failed
+
+    # 8. METRICS & THERMODYNAMICS
+    actual_delivered_mw = sum([c['rate'] for c in car_data]) / 1000.0
     
-    # Integrate over dt (simulated 1 sec steps usually)
+    losses_mw = 0.0
+    max_line_loading = 0.0
+    min_voltage = 0.0
+    vdi = 0.0 # Voltage Deviation Index
+    
+    if converged:
+        # Calculate Engineering Metrics
+        losses_mw = net.res_line.pl_mw.sum() + net.res_trafo.pl_mw.sum()
+        max_line_loading = max(net.res_line.loading_percent.max(), net.res_trafo.loading_percent.max())
+        min_voltage = net.res_bus.vm_pu.min()
+        
+        # Calculate VDI (Sum of squared deviations from 1.0)
+        # Often defined as Root Mean Square deviation or Accumulative deviation
+        # Here we use Sum of Deviations for simplicity in visualization trend
+        vdi = sum(abs(1.0 - net.res_bus.vm_pu)) 
+        
+        power_factor = (actual_delivered_mw / 2.5) ** 2
+    else:
+        power_factor = 20.0
+        losses_mw = 0
+        min_voltage = 0.0
+        max_line_loading = 999.0
+    
+    # Thermal Integration
+    cooling_factor = (grid_state["transformer_temp"] - grid_state["ambient_temp"]) * 0.05
     dT = (power_factor * 2.0) - cooling_factor
     grid_state["transformer_temp"] += dT
     
-    # 7. SAFETY CHECKS
-    min_voltage = 0.0
-    if converged:
-        min_voltage = min(net.res_bus.vm_pu)
-    else:
-        min_voltage = 0.0 # System collapsed
-    
-    if grid_state["transformer_temp"] > 200: # Flash point
+    # Safety
+    if grid_state["transformer_temp"] > 200:
         grid_state["is_blackout"] = True
         status_msg = "TRANSFORMER EXPLODED (>200°C)"
-        
+
     if grid_state["is_blackout"] or not converged:
-        # If not converged, treat as blackout/failure momentarily
         voltage_display = min_voltage if converged else 0.0
         return { 
             "min_voltage": round(voltage_display, 3), 
@@ -286,38 +358,20 @@ def run_simulation(num_cars, solar_intensity, strategy):
             "transformer_temp": int(grid_state["transformer_temp"]), 
             "cars": [], 
             "history": grid_state["history"], 
-            "map": get_live_map(net, [], True) 
+            "map": get_live_map(net, [], True),
+            "losses_mw": 0, "line_loading_percent": 0
         }
 
-    # 8. STRATEGY INTERVENTION
-    if strategy == "smart" and not grid_state["is_blackout"]:
-        if grid_state["transformer_temp"] > 100:
-            status_msg = "Smart Cooling Active"
-            # Throttling to reduce heat
-            for car in car_data:
-                car['rate'] *= 0.4 # Cut power by 60%
-                car['status'] = 'slow'
-        elif min_voltage < 0.95:
-            status_msg = "Voltage Optimizing"
-            for car in car_data:
-                car['rate'] *= 0.6
-                car['status'] = 'slow'
+    # 9. BATTERY & TIME
+    net_flow_mw = total_solar_mw - actual_delivered_mw # Actually delivered (includes losses? no, net flow at PCC usually measures import/export + solar. Let's simplify: Supply - Demand)
+    # Correct accounting: Net Flow = Solar - (Load + Losses)
+    net_flow_mw = total_solar_mw - (actual_delivered_mw + losses_mw)
 
-    # 9. UPDATE BATTERY (Integration)
-    # Re-calculate net flow based on final throttled rates
-    final_load_mw = sum([c['rate'] for c in car_data]) / 1000.0
-    net_flow_mw = total_solar_mw - final_load_mw
-    
-    # Apply flow (MW) * Time (hours) = MWh * 1000 = kWh
-    # We simulate "1 minute" per click for visible effect
     sim_step_hours = 1.0 / 60.0 
     grid_state["battery_kwh"] += (net_flow_mw * 1000 * sim_step_hours)
-    
-    # Clamp
     grid_state["battery_kwh"] = max(0, min(grid_state["battery_kwh"], grid_state["max_kwh"]))
     batt_percent = (grid_state["battery_kwh"] / grid_state["max_kwh"]) * 100
 
-    # 10. TIME ESTIMATE
     time_est = "Stable"
     if batt_percent <= 0.1 and net_flow_mw < 0:
         time_est = "DEPLETED"
@@ -329,26 +383,29 @@ def run_simulation(num_cars, solar_intensity, strategy):
         charge_rate = net_flow_mw * 1000
         time_est = f"Full in {int((grid_state['max_kwh']-grid_state['battery_kwh'])/charge_rate)}h"
 
-    # 11. CAR ETA
+    # 10. CAR ETA
     for car in car_data:
         if car['rate'] > 0.1:
             h = int((car['capacity']*(100-car['soc'])/100)/car['rate'])
             car['time_to_full'] = f"{h}h"
         else:
-            car['time_to_full'] = "No Power"
+            car['time_to_full'] = "Paused"
 
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    grid_state["history"].insert(0, {"time": timestamp, "status": status_msg, "volts": round(min_voltage,3)})
+    grid_state["history"].insert(0, {"time": timestamp, "status": status_msg, "volts": round(min_voltage,3), "losses": round(losses_mw, 3)})
     if len(grid_state["history"]) > 5:
         grid_state["history"].pop()
 
     return {
-        "min_voltage": round(min_voltage, 3), 
+        "min_voltage": round(min_voltage, 4), 
         "total_solar_mw": round(total_solar_mw, 2),
         "grid_battery_percent": round(batt_percent, 1),
         "grid_status_text": status_msg,
         "time_estimate": time_est, 
-        "net_flow_mw": float(round(net_flow_mw, 3)), 
+        "net_flow_mw": float(round(net_flow_mw, 3)),
+        "losses_mw": float(round(losses_mw, 4)),
+        "line_loading_percent": float(round(max_line_loading, 1)),
+        "vdi": float(round(vdi, 4)),
         "congestion_count": sum(1 for c in car_data if c['status']!='charging'),
         "transformer_temp": int(grid_state["transformer_temp"]),
         "cars": car_data,
