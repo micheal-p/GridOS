@@ -228,9 +228,9 @@ def run_simulation(num_cars, solar_intensity, strategy):
         grid_state["fleet"] = new_fleet
     else:
         # UPDATE PHYSICS (Charge Cars)
-        # TIME ACCELERATION: 300x Real-time (1 sec real = 5 min sim)
-        # This allows users to actually see charging happen in a reasonable demo time.
-        TIME_ACCELERATION = 300.0 
+        # TIME ACCELERATION: 25x Real-time (approx 15 real mins = full charge)
+        # Simulation Speed: 1 sec real world = 25 sec simulated
+        TIME_ACCELERATION = 25.0 
         hours_step = (dt * TIME_ACCELERATION) / 3600.0
         
         for car in current_fleet:
