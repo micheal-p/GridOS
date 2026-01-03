@@ -434,6 +434,7 @@
             <select id="strategy">
                 <option value="dumb">Baseline (Uncontrolled)</option>
                 <option value="smart">Smart Grid (Volt-Watt Control)</option>
+                <option value="priority">Priority (Shortest Job First)</option>
             </select>
 
             <button class="run-btn" onclick="toggleAutoRun()" id="autoBtn">
@@ -485,6 +486,17 @@
                     <div class="metric-value" id="tempDisplay" style="color:var(--green)">45°C</div>
                     <div class="metric-sub">Limit: 200°C</div>
                 </div>
+                <!-- Battery Card -->
+                <div class="metric-card">
+                    <label>Grid Battery
+                        <span class="tooltip-container"
+                            data-tooltip="Energy stored in the community microgrid battery. If Solar is 0 and this hits 0, BLACKOUT occurs.">
+                            <span class="info-icon">i</span>
+                        </span>
+                    </label>
+                    <div class="metric-value" id="battDisplay">80%</div>
+                    <div class="metric-sub" id="timeEst">Stable</div>
+                </div>
                 <div class="metric-card">
                     <label>Min Voltage</label>
                     <div class="metric-value" id="minVoltVal">-</div>
@@ -499,53 +511,59 @@
 
             <!-- Map -->
             <div class="map-section">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                    <div style="font-weight:700; font-size:14px; letter-spacing:0.5px;">IEEE 33-BUS TOPOLOGY</div>
-                    <div style="font-size:11px; color:#888;">Live Power Flow</div>
+                <div style="font-weight:700; font-size:14px; letter-spacing:0.5px;">IEEE 33-BUS TOPOLOGY</div>
+                <div style="font-size:11px; color:#888;">Live Power Flow</div>
+            </div>
+
+            <!-- LAYMAN EXPLANATION BOX -->
+            <div id="laymanBox"
+                style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding:12px; border-radius:8px; margin-bottom:15px; border-left: 4px solid #2196f3; font-size:13px; color:#0d47a1; line-height:1.4;">
+                <strong>Simulation Insight:</strong> <span id="explainText">System is ready. Press "Start Live
+                    Simulation" to begin.</span>
+            </div>
+
+            <details>
+                <summary>Research Topic: Engineering Constraints</summary>
+                <div class="explainer-text">
+                    <strong>1. Voltage Stability:</strong> ANSI C84.1 standard requires voltage between 0.95 and
+                    1.05 p.u. Our simulation allows drops to 0.90 before failure.<br>
+                    <strong>2. Volt-Watt Control:</strong> The "Smart" strategy uses a local droop curve. It senses
+                    bus voltage and throttles charging power if voltage drops below safe limits, improving the VDI
+                    score.<br>
+                    <strong>3. Thermal Inertia:</strong> Real-time integration of transformer temperature based on
+                    current squared ($I^2$).
+                </div>
+            </details>
+
+            <div class="map-wrapper" id="gridMap">
+                <div id="mapPlaceholder"
+                    style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:#aaa; font-weight:500;">
+                    Map Waiting for Data... (Press Start)
                 </div>
 
-                <details>
-                    <summary>Research Topic: Engineering Constraints</summary>
-                    <div class="explainer-text">
-                        <strong>1. Voltage Stability:</strong> ANSI C84.1 standard requires voltage between 0.95 and
-                        1.05 p.u. Our simulation allows drops to 0.90 before failure.<br>
-                        <strong>2. Volt-Watt Control:</strong> The "Smart" strategy uses a local droop curve. It senses
-                        bus voltage and throttles charging power if voltage drops below safe limits, improving the VDI
-                        score.<br>
-                        <strong>3. Thermal Inertia:</strong> Real-time integration of transformer temperature based on
-                        current squared ($I^2$).
+                <!-- Legend -->
+                <div
+                    style="position:absolute; bottom:15px; left:15px; background:rgba(255,255,255,0.9); padding:10px; border-radius:8px; border:1px solid #ddd; font-size:10px; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
+                    <div style="display:flex; align-items:center; margin-bottom:5px;">
+                        <div style="width:10px; height:10px; background:#000; margin-right:5px; border-radius:50%;">
+                        </div> Substation (Source)
                     </div>
-                </details>
-
-                <div class="map-wrapper" id="gridMap">
-                    <div id="mapPlaceholder"
-                        style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:#aaa; font-weight:500;">
-                        Map Waiting for Data... (Press Start)
+                    <div style="display:flex; align-items:center; margin-bottom:5px;">
+                        <div
+                            style="width:10px; height:10px; border:2px solid #333; margin-right:5px; border-radius:50%;">
+                        </div> Load Bus (Node)
                     </div>
-
-                    <!-- Legend -->
-                    <div
-                        style="position:absolute; bottom:15px; left:15px; background:rgba(255,255,255,0.9); padding:10px; border-radius:8px; border:1px solid #ddd; font-size:10px; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
-                        <div style="display:flex; align-items:center; margin-bottom:5px;">
-                            <div style="width:10px; height:10px; background:#000; margin-right:5px; border-radius:50%;">
-                            </div> Substation (Source)
-                        </div>
-                        <div style="display:flex; align-items:center; margin-bottom:5px;">
-                            <div
-                                style="width:10px; height:10px; border:2px solid #333; margin-right:5px; border-radius:50%;">
-                            </div> Load Bus (Node)
-                        </div>
-                        <div style="display:flex; align-items:center;">
-                            <div style="width:15px; height:3px; background:#bbb; margin-right:5px;"></div> Feeder Line
-                        </div>
+                    <div style="display:flex; align-items:center;">
+                        <div style="width:15px; height:3px; background:#bbb; margin-right:5px;"></div> Feeder Line
                     </div>
                 </div>
             </div>
-
-            <!-- Fleet -->
-            <div style="font-weight:700; font-size:18px; margin-bottom:20px;">Connected Fleet</div>
-            <div class="fleet-grid" id="fleetGrid"></div>
         </div>
+
+        <!-- Fleet -->
+        <div style="font-weight:700; font-size:18px; margin-bottom:20px;">Connected Fleet</div>
+        <div class="fleet-grid" id="fleetGrid"></div>
+    </div>
     </div>
 
     <script>
@@ -554,6 +572,8 @@
         let isAutoRunning = false;
         let currentTemp = 45;
         let isBlackout = false;
+        let batteryOverride = null;
+        let isDraggingBatt = false;
 
         function uiUpdate(source) {
             // Sync Input and Range
@@ -561,6 +581,13 @@
                 document.getElementById('numCarsInput').value = document.getElementById('numCarsRange').value;
             } else if (source === 'input') {
                 document.getElementById('numCarsRange').value = document.getElementById('numCarsInput').value;
+            } else if (source === 'batt') {
+                document.getElementById('battVal').innerText = document.getElementById('battRange').value + "%";
+                batteryOverride = document.getElementById('battRange').value * 100; // send as kwh? No, logic in backend expects kwh?
+                // Wait, backend expects kwh. 
+                // We need to convert % to kWh. Max is 10000.
+                batteryOverride = (document.getElementById('battRange').value / 100.0) * 10000.0;
+                isDraggingBatt = true;
             }
             // Solar update
             document.getElementById('solarVal').innerText = document.getElementById('solar').value;
@@ -623,10 +650,24 @@
                     body: JSON.stringify({
                         num_cars: document.getElementById('numCarsRange').value,
                         solar: document.getElementById('solar').value,
-                        strategy: document.getElementById('strategy').value
+                        strategy: document.getElementById('strategy').value,
+                        battery_override: batteryOverride // Only send if dragged
                     })
                 });
                 const data = await res.json();
+
+                // Clear override after one-time send (hacky but works for slider drag)
+                // Actually, best to just send null if not changing.
+                // Let's implement a "dirty" check or just send current slider val if user is interacting? 
+                // Better: The backend is persistent. If we send value, it sets it. 
+                // So we should only send it if the user *just* moved the slider.
+                // Simplified: We always send the slider value? No, then physics won't drain it.
+                // FIX: We only send value if a global flag 'isDraggingBatt' is true.
+
+                if (isDraggingBatt) {
+                    batteryOverride = null; // Reset backend override trigger
+                    isDraggingBatt = false;
+                }
 
                 // Update Physics State
                 currentTemp = data.transformer_temp;
@@ -634,10 +675,19 @@
                 startLiveTicker(data.net_flow_mw);
 
                 // Update New Metrics
+                document.getElementById('explainText').innerText = data.layman_explanation; // Update Insight
                 updateMetric('vdiVal', data.vdi.toFixed(4));
                 updateMetric('lossVal', data.losses_mw.toFixed(3));
                 updateMetric('loadVal', data.line_loading_percent.toFixed(1) + "%");
                 updateMetric('minVoltVal', data.min_voltage.toFixed(3) + " p.u.");
+
+                // Update Battery UI (only if not dragging)
+                if (!document.getElementById('battRange').matches(':active')) {
+                    document.getElementById('battDisplay').innerText = data.grid_battery_percent + "%";
+                    document.getElementById('battRange').value = data.grid_battery_percent;
+                    document.getElementById('battVal').innerText = data.grid_battery_percent + "%";
+                }
+                document.getElementById('timeEst').innerText = data.time_estimate;
 
                 document.getElementById('sysStatus').innerText = data.grid_status_text;
                 document.getElementById('log').innerText = `Live Step: ${data.history[0].time} | Strategy: ${document.getElementById('strategy').value.toUpperCase()}`;

@@ -27,7 +27,6 @@ grid_state = {
     "ambient_temp": 30.0,
     "is_blackout": False, 
     "last_update": None,        # For dT calculations
-    "last_update": None,        # For dT calculations
     "history": [],
     "fleet": []                 # Persistent Fleet State
 }
@@ -167,7 +166,7 @@ def get_live_map(net, car_data, is_blackout):
     )
     return json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
 
-def run_simulation(num_cars, solar_intensity, strategy):
+def run_simulation(num_cars, solar_intensity, strategy, battery_override=None):
     net = pn.case33bw()
     current_time = time.time()
     
@@ -180,6 +179,10 @@ def run_simulation(num_cars, solar_intensity, strategy):
             dt = 1.0 
     
     grid_state["last_update"] = current_time
+
+    # Manual Battery Override (for UX demo)
+    if battery_override is not None:
+        grid_state["battery_kwh"] = float(battery_override)
 
     # 1. RESET Logic / Cooling
     if grid_state["is_blackout"]:
@@ -252,39 +255,55 @@ def run_simulation(num_cars, solar_intensity, strategy):
     for bus in [18, 22, 25, 32]:
         pp.create_sgen(net, bus, p_mw=total_solar_mw/4, q_mvar=0)
 
-    # 4. INITIAL ENERGY BALANCE 
+    # 4. INITIAL ENERGY BALANCE (OFF-GRID / ISLAND MODE)
+    # The user has specified "No External Energy". The Substation is effectively disconnected.
+    # We rely PURELY on Solar + Battery.
+    
     total_requested_mw = sum([c['requested_rate'] for c in car_data]) / 1000.0
-    battery_discharge_cap_mw = 10.0 if grid_state["battery_kwh"] > 10 else 0.0
-    available_mw = total_solar_mw + battery_discharge_cap_mw
+    
+    # Simple Battery Logic: If we have charge, we can discharge up to 5MW (arbitrary inverter limit)
+    max_discharge_mw = 5.0
+    battery_discharge_available = max_discharge_mw if grid_state["battery_kwh"] > 50 else 0.0
+    
+    available_supply_mw = total_solar_mw + battery_discharge_available
+    
+    # STRICT ISLAND CHECK
+    status_msg = "Stable"
+    if available_supply_mw < 0.05: # Effectively zero generation
+        status_msg = "BLACKOUT (No Generation)"
+        grid_state["is_blackout"] = True
+        # Collapse
+        return { 
+            "min_voltage": 0.0, "total_solar_mw": total_solar_mw, "grid_battery_percent": round((grid_state["battery_kwh"]/grid_state["max_kwh"])*100,1),
+            "grid_status_text": status_msg, "time_estimate": "Depleted", "net_flow_mw": 0, 
+            "transformer_temp": int(grid_state["transformer_temp"]), "cars": [], 
+            "history": grid_state["history"], "map": get_live_map(net, [], True),
+             "layman_explanation": "TOTAL BLACKOUT: No external grid. Solar is OFF and Battery is empty. The system has collapsed.",
+             "losses_mw": 0, "line_loading_percent": 0, "vdi": 0
+        }
     
     # 5. SMART STRATEGY (Optimization / Droop Control)
-    # Applied BEFORE Power Flow (Logic Simulation) or iteratively.
-    # Here we simulate an iterative approach by applying limits based on 'Grid Stress' assumptions
-    # or by running a baseline PF and then correcting.
-    # For efficiency, we will run logic based on available capacity first (Brownout prevention)
+    # Since we are Off-Grid, we MUST balance Supply = Demand. 
+    # If Demand > Supply, we MUST throttle/shed load immediately or voltage collapses.
     
-    status_msg = "Stable"
-    # Global Capacity Check (Brownout)
-    global_ratio = 1.0
-    if total_requested_mw > available_mw:
-        if grid_state["battery_kwh"] <= 10:
-             # Solar Only Limit
-             if total_solar_mw <= 0.1:
-                 global_ratio = 0
-                 status_msg = "GRID COLLAPSE (No Power)"
-             else:
-                 global_ratio = total_solar_mw / total_requested_mw
-                 status_msg = "BROWNOUT (Power Limited)"
-    
+    ratio = 1.0
+    if total_requested_mw > available_supply_mw:
+        ratio = available_supply_mw / total_requested_mw
+        status_msg = f"ISLAND MODE: Throttled to {int(ratio*100)}%"
+        # Apply Global Ratio to keep system alive
+        for car in car_data:
+             car['requested_rate'] *= ratio
+
+    global_ratio = ratio # Sync
+
     for car in car_data:
-        # Reset requested rate if not fully charged
+        # Reset requested rate if not fully charged (and not already ratio'd? No, apply ratio)
         if car['soc'] < 100:
-            car['requested_rate'] = car['max_rate']
-            car['status'] = 'charging'
+             car['status'] = 'charging'
             
-        car['rate'] = car['requested_rate'] * global_ratio
-        if global_ratio < 0.05 and car['soc'] < 100:
-            car['status'] = 'stopped'
+        car['rate'] = car['requested_rate'] 
+        if car['rate'] < 0.1 and car['soc'] < 100:
+            car['status'] = 'stopped (no power)'
             
     # Apply Loads to Net
     # net.load.drop(net.load.index, inplace=True) # FIXED: Do not drop base loads!
@@ -298,11 +317,17 @@ def run_simulation(num_cars, solar_intensity, strategy):
 
     # 6. RUN POWER FLOW (Physics)
     try:
+        # In Island Mode, calculating slack bus P is tricky in standard power flow without a slack.
+        # But pandapower standard runpp assumes a Slack Bus exists (Bus 0). 
+        # To simulate Island behavior VISUALLY, we just pretend Bus 0 is the Inverter/Solar source.
+        # Since we pre-balanced Demand <= Supply above, the Slack Bus shouldn't supply extra.
+        # We enforced Load <= Solar+Battery.
+        
         pp.runpp(net, numba=False)
         converged = True
     except pp.LoadflowNotConverged:
         converged = False
-        status_msg = "UNSTABLE (Diverged)"
+        status_msg = "UNSTABLE (Island Diverged)"
     except Exception as e:
         print(f"Powerflow error: {e}")
         converged = False
@@ -342,11 +367,6 @@ def run_simulation(num_cars, solar_intensity, strategy):
         
         if intervention_needed:
             new_status = "Smart Voltage Optimization"
-            # Re-run Power Flow with new rates?
-            # Strictly speaking we should, to get final metrics.
-            # Reset loads
-        if intervention_needed:
-            new_status = "Smart Voltage Optimization"
             # Reset loads: Keep only base loads, remove the EV loads we added previously
             net.load = net.load.loc[base_load_indices]
             
@@ -358,6 +378,41 @@ def run_simulation(num_cars, solar_intensity, strategy):
                 status_msg = new_status
             except:
                 converged = False # Optimization failed
+
+    # 7b. PRIORITY STRATEGY (Shortest Job First / Queuing)
+    if strategy == "priority" and converged:
+        # Check for constraint violations
+        min_v = net.res_bus.vm_pu.min()
+        if min_v < 0.90:
+            status_msg = "Grid Congested (Queuing Applied)"
+            
+            # Sort by LEAST energy needed (Shortest Job First)
+            # Ensure kwh_needed is calculated
+            for car in car_data:
+                car['kwh_needed'] = (100.0 - car['soc']) / 100.0 * car['capacity']
+            
+            # We want to keep the short jobs, queue the long ones.
+            car_data.sort(key=lambda x: x['kwh_needed'])
+            
+            # Simple simulation of capacity limit
+            # If voltage is low, cut the bottom 50% of cars (Longest Jobs)
+            limit_index = int(len(car_data) * 0.5) 
+            
+            # Reset loads
+            net.load = net.load.loc[base_load_indices]
+            
+            for i, car in enumerate(car_data):
+                if i >= limit_index and car['soc'] < 100:
+                    car['status'] = 'queued'
+                    car['rate'] = 0.0
+                elif car['soc'] < 100:
+                    car['status'] = 'charging' 
+                    pp.create_load(net, bus=car['bus_loc'], p_mw=car['rate']/1000.0, q_mvar=0)
+            
+            try:
+                pp.runpp(net, numba=False)
+            except:
+                converged = False
 
     # 8. METRICS & THERMODYNAMICS
     actual_delivered_mw = sum([c['rate'] for c in car_data]) / 1000.0
@@ -452,6 +507,28 @@ def run_simulation(num_cars, solar_intensity, strategy):
     # Sort fleets by Bus Location for stable UI
     car_data.sort(key=lambda x: x['bus_loc'])
 
+    # 11. LAYMAN'S EXPLANATION
+    layman_explanation = "Island Mode Active. Running effectively on Solar + Battery."
+    
+    if grid_state["is_blackout"]:
+         layman_explanation = "TOTAL BLACKOUT: The Island Grid has collapsed. No Solar or Battery power available."
+    elif total_solar_mw < 0.1:
+         layman_explanation = "Running on Battery Reserves. Solar is OFF. Conserving energy is critical."
+    elif total_requested_mw > available_supply_mw:
+         layman_explanation = f"Generation Deficit! Solar ({total_solar_mw:.1f}MW) cannot meet Demand. Throttling all cars to prevent collapse."
+    
+    # Stress Logic (Overrides Power Source info if urgent)
+    if "Smart Voltage" in status_msg:
+        layman_explanation = "The grid is running out of power. Charging speeds are slowed down for everyone to prevent a blackout."
+    elif "smart-curtailed" in str(car_data): # simplified check
+        count_throttled = sum(1 for c in car_data if "curtailed" in c['status'])
+        layman_explanation = f"Voltage dropping! The Smart Grid detected stress and slowed down {count_throttled} cars to keep the lights on."
+    elif "Grid Congested" in status_msg:
+        count_queued = sum(1 for c in car_data if c['status'] == 'queued')
+        layman_explanation = f"Too many cars! The system paused {count_queued} cars effectively putting them in a waiting line. Shortest jobs get priority."
+    elif min_voltage < 0.96 and min_voltage > 0.90:
+        layman_explanation = "Heavy load detected. Voltage is sagging slightly, but still within safe limits."
+
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     grid_state["history"].insert(0, {"time": timestamp, "status": status_msg, "volts": round(min_voltage,3), "losses": round(losses_mw, 3)})
     if len(grid_state["history"]) > 5:
@@ -462,6 +539,7 @@ def run_simulation(num_cars, solar_intensity, strategy):
         "total_solar_mw": round(total_solar_mw, 2),
         "grid_battery_percent": round(batt_percent, 1),
         "grid_status_text": status_msg,
+        "layman_explanation": layman_explanation,
         "time_estimate": time_est, 
         "net_flow_mw": float(round(net_flow_mw, 3)),
         "losses_mw": float(round(losses_mw, 4)),
@@ -482,7 +560,12 @@ def home():
 def simulate():
     try:
         data = request.json
-        return jsonify(run_simulation(int(data.get('num_cars')), float(data.get('solar')), data.get('strategy')))
+        return jsonify(run_simulation(
+            int(data.get('num_cars')), 
+            float(data.get('solar')), 
+            data.get('strategy'),
+            data.get('battery_override')
+        ))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
