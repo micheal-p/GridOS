@@ -513,7 +513,7 @@ def run_simulation(num_cars, solar_intensity, strategy, battery_override=None):
     if grid_state["is_blackout"]:
          layman_explanation = "TOTAL BLACKOUT: The Island Grid has collapsed. No Solar or Battery power available."
     elif total_solar_mw < 0.1:
-         layman_explanation = "Running on Battery Reserves. Solar is OFF. Conserving energy is critical."
+         layman_explanation = "Running on GRID BATTERY. Solar is OFF (Night Mode). System will collapse if Battery hits 0%."
     elif total_requested_mw > available_supply_mw:
          layman_explanation = f"Generation Deficit! Solar ({total_solar_mw:.1f}MW) cannot meet Demand. Throttling all cars to prevent collapse."
     
@@ -568,6 +568,17 @@ def simulate():
         ))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/reset', methods=['POST'])
+def reset_simulation():
+    global grid_state
+    # Reset to initial defaults
+    grid_state["battery_kwh"] = 8000.0
+    grid_state["transformer_temp"] = 45.0
+    grid_state["is_blackout"] = False
+    grid_state["history"] = []
+    grid_state["fleet"] = [] # Clear persistent fleet
+    return jsonify({"status": "reset", "message": "Simulation State Cleared"})
 
 if __name__ == '__main__':
     app.run(debug=True)

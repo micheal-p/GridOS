@@ -430,6 +430,21 @@
                 </div>
             </div>
 
+            <div style="margin-bottom: 35px;">
+                <label>
+                    Grid Battery Level
+                    <span class="tooltip-container"
+                        data-tooltip="Manually charge/discharge the community battery. Set to 0% with 0% Solar to test Blackout.">
+                        <span class="info-icon">i</span>
+                    </span>
+                </label>
+                <input type="range" id="battRange" min="0" max="100" value="80" oninput="uiUpdate('batt')">
+                <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600;">
+                    <span style="color:#aaa;">Storage</span>
+                    <span><span id="battVal">80</span></span>
+                </div>
+            </div>
+
             <label>Charging Intelligence</label>
             <select id="strategy">
                 <option value="dumb">Baseline (Uncontrolled)</option>
@@ -437,8 +452,12 @@
                 <option value="priority">Priority (Shortest Job First)</option>
             </select>
 
-            <button class="run-btn" onclick="toggleAutoRun()" id="autoBtn">
+            <button class="run-btn" onclick="toggleAutoRun()" id="autoBtn" style="margin-bottom:10px;">
                 <span id="playIcon">▶</span> <span id="btnText">START LIVE SIMULATION</span>
+            </button>
+            <button onclick="resetSystem()"
+                style="width:100%; padding:12px; background:rgba(0,0,0,0.05); color:#666; border:none; border-radius:12px; font-size:11px; font-weight:700; cursor:pointer;">
+                RESTART SYSTEM
             </button>
             <div style="margin-top:15px; font-size:11px; color:#888; text-align:center; line-height:1.4;">
                 <div id="log">System Ready • v2.2</div>
@@ -509,61 +528,94 @@
                 </div>
             </div>
 
-            <!-- Map -->
-            <div class="map-section">
-                <div style="font-weight:700; font-size:14px; letter-spacing:0.5px;">IEEE 33-BUS TOPOLOGY</div>
-                <div style="font-size:11px; color:#888;">Live Power Flow</div>
-            </div>
-
             <!-- LAYMAN EXPLANATION BOX -->
             <div id="laymanBox"
-                style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding:12px; border-radius:8px; margin-bottom:15px; border-left: 4px solid #2196f3; font-size:13px; color:#0d47a1; line-height:1.4;">
+                style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding:12px; border-radius:8px; margin-bottom:20px; border-left: 4px solid #2196f3; font-size:13px; color:#0d47a1; line-height:1.4;">
                 <strong>Simulation Insight:</strong> <span id="explainText">System is ready. Press "Start Live
                     Simulation" to begin.</span>
             </div>
 
-            <details>
-                <summary>Research Topic: Engineering Constraints</summary>
-                <div class="explainer-text">
-                    <strong>1. Voltage Stability:</strong> ANSI C84.1 standard requires voltage between 0.95 and
-                    1.05 p.u. Our simulation allows drops to 0.90 before failure.<br>
-                    <strong>2. Volt-Watt Control:</strong> The "Smart" strategy uses a local droop curve. It senses
-                    bus voltage and throttles charging power if voltage drops below safe limits, improving the VDI
-                    score.<br>
-                    <strong>3. Thermal Inertia:</strong> Real-time integration of transformer temperature based on
-                    current squared ($I^2$).
-                </div>
-            </details>
-
-            <div class="map-wrapper" id="gridMap">
-                <div id="mapPlaceholder"
-                    style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:#aaa; font-weight:500;">
-                    Map Waiting for Data... (Press Start)
+            <!-- Map Section -->
+            <div class="map-section">
+                <!-- Header -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <div>
+                        <div style="font-weight:700; font-size:14px; letter-spacing:0.5px;">IEEE 33-BUS TOPOLOGY</div>
+                        <div style="font-size:11px; color:#888;">Live Power Flow</div>
+                    </div>
                 </div>
 
-                <!-- Legend -->
-                <div
-                    style="position:absolute; bottom:15px; left:15px; background:rgba(255,255,255,0.9); padding:10px; border-radius:8px; border:1px solid #ddd; font-size:10px; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
-                    <div style="display:flex; align-items:center; margin-bottom:5px;">
-                        <div style="width:10px; height:10px; background:#000; margin-right:5px; border-radius:50%;">
-                        </div> Substation (Source)
+                <!-- Map -->
+                <div class="map-wrapper" id="gridMap">
+                    <div id="mapPlaceholder"
+                        style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:#aaa; font-weight:500;">
+                        Map Waiting for Data... (Press Start)
                     </div>
-                    <div style="display:flex; align-items:center; margin-bottom:5px;">
-                        <div
-                            style="width:10px; height:10px; border:2px solid #333; margin-right:5px; border-radius:50%;">
-                        </div> Load Bus (Node)
+
+                    <!-- Legend -->
+                    <div
+                        style="position:absolute; bottom:50px; left:15px; background:rgba(255,255,255,0.9); padding:10px; border-radius:8px; border:1px solid #ddd; font-size:10px; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
+                        <div style="display:flex; align-items:center; margin-bottom:5px;">
+                            <div style="width:10px; height:10px; background:#000; margin-right:5px; border-radius:50%;">
+                            </div> Substation (Source)
+                        </div>
+                        <div style="display:flex; align-items:center; margin-bottom:5px;">
+                            <div
+                                style="width:10px; height:10px; border:2px solid #333; margin-right:5px; border-radius:50%;">
+                            </div> Load Bus (Node)
+                        </div>
+                        <div style="display:flex; align-items:center;">
+                            <div style="width:15px; height:3px; background:#bbb; margin-right:5px;"></div> Feeder Line
+                        </div>
                     </div>
-                    <div style="display:flex; align-items:center;">
-                        <div style="width:15px; height:3px; background:#bbb; margin-right:5px;"></div> Feeder Line
+
+                    <!-- Fleet Stats (Below Legend, Transparent, Clickable) -->
+                    <div
+                        style="position:absolute; bottom:15px; left:15px; display:flex; gap:15px; font-size:11px; font-weight:600;">
+                        <div style="color:#333; text-shadow:0 1px 2px rgba(255,255,255,0.8); cursor:pointer;"
+                            onclick="setFilter('all')">
+                            Total: <span id="countTotal">0</span>
+                        </div>
+                        <div style="color:var(--orange); text-shadow:0 1px 2px rgba(255,255,255,0.8); cursor:pointer;"
+                            onclick="setFilter('throttled')">
+                            Throttled: <span id="countThrottled">0</span>
+                        </div>
+                        <div style="color:var(--green); text-shadow:0 1px 2px rgba(255,255,255,0.8); cursor:pointer;"
+                            onclick="setFilter('active')">
+                            Active: <span id="countActive">0</span>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Details inside map card (cleaner) -->
+                <div style="margin-top:20px;">
+                    <details style="margin-bottom:0; background:#f9f9f9; border:none;">
+                        <summary style="font-size:12px; opacity:0.7;">Research Topic: Engineering Constraints</summary>
+                        <div class="explainer-text">
+                            <strong>1. Voltage Stability:</strong> ANSI C84.1 standard requires voltage between 0.95 and
+                            1.05 p.u. Our simulation allows drops to 0.90 before failure.<br>
+                            <strong>2. Volt-Watt Control:</strong> The "Smart" strategy uses a local droop curve. It
+                            senses
+                            bus voltage and throttles charging power if voltage drops below safe limits, improving the
+                            VDI
+                            score.<br>
+                            <strong>3. Thermal Inertia:</strong> Real-time integration of transformer temperature based
+                            on
+                            current squared ($I^2$).
+                        </div>
+                    </details>
+                </div>
+                <!-- Fleet -->
+
             </div>
         </div>
 
-        <!-- Fleet -->
+    </div>
+
+    <!-- Full Width Fleet Section (Below Dashboard) -->
+    <div style="width: 92%; max-width: 1600px; margin-bottom: 80px;">
         <div style="font-weight:700; font-size:18px; margin-bottom:20px;">Connected Fleet</div>
         <div class="fleet-grid" id="fleetGrid"></div>
-    </div>
     </div>
 
     <script>
@@ -574,6 +626,15 @@
         let isBlackout = false;
         let batteryOverride = null;
         let isDraggingBatt = false;
+        let debounceTimer = null;
+        let currentFilter = 'all';
+        let latestCars = [];
+
+        function setFilter(type) {
+            currentFilter = type;
+            document.getElementById('fleetGrid').scrollIntoView({ behavior: 'smooth' });
+            if (latestCars.length > 0) renderFleet(latestCars);
+        }
 
         function uiUpdate(source) {
             // Sync Input and Range
@@ -583,17 +644,28 @@
                 document.getElementById('numCarsRange').value = document.getElementById('numCarsInput').value;
             } else if (source === 'batt') {
                 document.getElementById('battVal').innerText = document.getElementById('battRange').value + "%";
-                batteryOverride = document.getElementById('battRange').value * 100; // send as kwh? No, logic in backend expects kwh?
-                // Wait, backend expects kwh. 
-                // We need to convert % to kWh. Max is 10000.
                 batteryOverride = (document.getElementById('battRange').value / 100.0) * 10000.0;
                 isDraggingBatt = true;
             }
             // Solar update
             document.getElementById('solarVal').innerText = document.getElementById('solar').value;
+
+            // AUTO-TRIGGER SIMULATION (Live Feedback)
+            // Debounce to prevent API spam while dragging
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                if (!isAutoRunning) runSim(); // Only trigger if not already looping
+            }, 300);
         }
 
         // --- PHYSICS ENGINE (Visual Only) ---
+        function resetSystem() {
+            if (!confirm("Reset Simulation? This will clear all data.")) return;
+            fetch('/reset', { method: 'POST' })
+                .then(() => window.location.reload())
+                .catch(e => console.error(e));
+        }
+
         function startLiveTicker(netFlow) {
             if (physicsInterval) clearInterval(physicsInterval);
             physicsInterval = setInterval(() => {
@@ -730,23 +802,61 @@
 
         function renderFleet(cars) {
             const grid = document.getElementById('fleetGrid');
-            grid.innerHTML = "";
+            const totalEl = document.getElementById('countTotal');
+            const throttledEl = document.getElementById('countThrottled');
+            const activeEl = document.getElementById('countActive');
+
+            // Store for re-filtering
+            latestCars = cars || [];
+
             if (!cars || cars.length === 0) {
                 grid.innerHTML = "<div style='color:#999; padding:20px;'>No vehicles active.</div>";
+                totalEl.innerText = "0";
+                throttledEl.innerText = "0";
+                activeEl.innerText = "0";
                 return;
             }
 
+            // Calculate Counts (Always based on FULL list)
+            let tCount = 0;
+            let aCount = 0;
+
             cars.forEach(c => {
+                if (c.status.includes('curtailed') || c.status === 'queued') tCount++;
+                if (c.status === 'charging') aCount++;
+            });
+
+            totalEl.innerText = cars.length;
+            throttledEl.innerText = tCount;
+            activeEl.innerText = aCount;
+
+            // Filter for Display
+            let displayCars = cars;
+            if (currentFilter === 'throttled') {
+                displayCars = cars.filter(c => c.status.includes('curtailed') || c.status === 'queued');
+            } else if (currentFilter === 'active') {
+                displayCars = cars.filter(c => c.status === 'charging');
+            }
+
+            // Render
+            grid.innerHTML = "";
+            if (displayCars.length === 0) {
+                grid.innerHTML = `<div style='color:#999; padding:20px;'>No ${currentFilter} vehicles found.</div>`;
+                return;
+            }
+
+            displayCars.forEach(c => {
                 let badge = "";
                 let statusColor = "var(--green)";
 
                 if (c.status === 'stopped') {
                     badge = `<div class="badge" style="background:var(--red)">STOPPED</div>`;
                     statusColor = "var(--red)";
-                } else if (c.status.includes('curtailed')) {
+                } else if (c.status.includes('curtailed') || c.status === 'queued') {
                     badge = `<div class="badge" style="background:var(--orange)">THROTTLED</div>`;
                     statusColor = "var(--orange)";
-                    c.status = "Smart Curtailment"; // clean text
+                    if (c.status === 'queued') c.status = "Queued (Waiting)";
+                    else c.status = "Smart Curtailment";
                 } else {
                     badge = `<div class="badge" style="background:#000">CHARGING</div>`;
                 }
