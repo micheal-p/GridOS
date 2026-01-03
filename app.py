@@ -184,7 +184,12 @@ def run_simulation(num_cars, solar_intensity, strategy, battery_override=None):
     if battery_override is not None:
         grid_state["battery_kwh"] = float(battery_override)
 
-    # 1. RESET Logic / Cooling
+    # 1. CLEANUP (Microgrid Mode)
+    # Remove standard IEEE base loads (households) so the grid is purely EV-dependent.
+    # This ensures 0 drain when EVs are full.
+    net.load.drop(net.load.index, inplace=True)
+
+    # 1B. RESET TEMP Logic / Cooling
     if grid_state["is_blackout"]:
         # Natural Cooling
         grid_state["transformer_temp"] += (grid_state["ambient_temp"] - grid_state["transformer_temp"]) * 0.1
